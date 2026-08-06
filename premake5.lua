@@ -10,8 +10,9 @@
 
 --- Use global variables to share settings across different scripts.
 
--- Server Mode
-SERVER_MODE = true
+-- Server Mode: default true (headless host). Pass --client (or set YGOPRO_SERVER_MODE=0) to build the GUI client.
+newoption { trigger = "client", category = "YGOPro", description = "Build the GUI client instead of the headless server" }
+SERVER_MODE = (os.getenv("YGOPRO_SERVER_MODE") ~= "0") and not _OPTIONS["client"]
 SERVER_ZIP_SUPPORT = false
 SERVER_PRO2_SUPPORT = false
 SERVER_TAG_SURRENDER_CONFIRM = false
@@ -285,6 +286,8 @@ newoption { trigger = "server-zip-support", category = "YGOPro - server", descri
 newoption { trigger = "server-pro2-support", category = "YGOPro - server", description = "" }
 newoption { trigger = "server-tag-surrender-confirm", category = "YGOPro - server", description = "" }
 
+end
+
 boolOptions = {
     "no-lua-safe",
     "no-side-check"
@@ -303,8 +306,6 @@ numberOptions = {
 }
 for _, numberOption in ipairs(numberOptions) do
     newoption { trigger = numberOption, category = "YGOPro - options", description = "", value = "NUMBER" }
-end
-
 end
 
 ---- Process options
@@ -509,18 +510,16 @@ workspace "YGOPro"
 
     configurations { "Release", "Debug" }
 
-if SERVER_MODE then
-    for _, numberOption in ipairs(numberOptions) do
-        local value = tonumber(GetParam(numberOption))
-        if value then
-            defines { "YGOPRO_" .. string.upper(string.gsub(numberOption, "-", "_")) .. "=" .. value }
-        end
+for _, numberOption in ipairs(numberOptions) do
+    local value = tonumber(GetParam(numberOption))
+    if value then
+        defines { "YGOPRO_" .. string.upper(string.gsub(numberOption, "-", "_")) .. "=" .. value }
     end
+end
 
-    for _, boolOption in ipairs(boolOptions) do
-        if GetParam(boolOption) then
-            defines { "YGOPRO_" .. string.upper(string.gsub(boolOption, "-", "_")) }
-        end
+for _, boolOption in ipairs(boolOptions) do
+    if GetParam(boolOption) then
+        defines { "YGOPRO_" .. string.upper(string.gsub(boolOption, "-", "_")) }
     end
 end
 
