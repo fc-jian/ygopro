@@ -90,11 +90,11 @@ static unsigned int checkAvail(unsigned int ot, unsigned int avail) {
 uint32_t DeckManager::CheckDeck(const Deck& deck, unsigned int lfhash, size_t rule) {
 	std::unordered_map<uint32_t, int> ccount;
 	// rule
-	if(deck.main.size() < DECK_MIN_SIZE || deck.main.size() > DECK_MAX_SIZE)
+	if(deck.main.size() < deck_main_min || deck.main.size() > deck_main_max)
 		return (DECKERROR_MAINCOUNT << 28) | (unsigned)deck.main.size();
-	if(deck.extra.size() > EXTRA_MAX_SIZE)
+	if(deck.extra.size() > deck_extra_max)
 		return (DECKERROR_EXTRACOUNT << 28) | (unsigned)deck.extra.size();
-	if(deck.side.size() > SIDE_MAX_SIZE)
+	if(deck.side.size() > deck_side_max)
 		return (DECKERROR_SIDECOUNT << 28) | (unsigned)deck.side.size();
 	auto lflist = GetLFList(lfhash);
 	if (!lflist)
@@ -151,7 +151,16 @@ uint32_t DeckManager::CheckDeck(const Deck& deck, unsigned int lfhash, size_t ru
 	}
 	return 0;
 }
-uint32_t DeckManager::LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t sidec, bool is_packlist) {
+void DeckManager::SetDeckLimits(int main_min, int main_max, int extra_max, int side_max) {
+	if(main_min < 0 || main_max < main_min || extra_max < 0 || side_max < 0)
+		return;
+	deck_main_min = main_min;
+	deck_main_max = main_max;
+	deck_extra_max = extra_max;
+	deck_side_max = side_max;
+	deck_limits_set = true;
+}
+uint32_t DeckManager::LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t sidec, bool is_packlist, int main_max, int extra_max, int side_max) {
 	deck.clear();
 	uint32_t errorcode = 0;
 	auto& _datas = dataManager.GetDataTable();
@@ -172,11 +181,11 @@ uint32_t DeckManager::LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint
 			continue;
 		}
 		if (cd.type & TYPES_EXTRA_DECK) {
-			if (deck.extra.size() < EXTRA_MAX_SIZE)
+			if (deck.extra.size() < extra_max)
 				deck.extra.push_back(&cd);
 		}
 		else {
-			if (deck.main.size() < DECK_MAX_SIZE)
+			if (deck.main.size() < main_max)
 				deck.main.push_back(&cd);
 		}
 	}
@@ -192,7 +201,7 @@ uint32_t DeckManager::LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint
 			errorcode = code;
 			continue;
 		}
-		if(deck.side.size() < SIDE_MAX_SIZE)
+		if(deck.side.size() < side_max)
 			deck.side.push_back(&cd);
 	}
 	return errorcode;
@@ -232,7 +241,9 @@ bool DeckManager::LoadSide(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t
 	for(auto card : deck.side)
 		pcount[card->code]++;
 	Deck ndeck;
-	LoadDeck(ndeck, dbuf, mainc, sidec);
+	// runtime deck limits (spawn args 13..16) must apply here too — the static
+	// defaults would truncate oversized decks and fail the size check below
+	LoadDeck(ndeck, dbuf, mainc, sidec, false, deckManager.deck_main_max, deckManager.deck_extra_max, deckManager.deck_side_max);
 #ifndef YGOPRO_NO_SIDE_CHECK
 	if (ndeck.main.size() != deck.main.size() || ndeck.extra.size() != deck.extra.size() || ndeck.side.size() != deck.side.size())
 		return false;

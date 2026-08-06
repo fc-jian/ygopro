@@ -58,6 +58,15 @@ public:
 #endif
 	std::vector<LFList> _lfList;
 
+	// Runtime deck size limits (spawn args 13..16 in gframe.cpp; defaults = constants above)
+	int deck_main_min = DECK_MIN_SIZE;
+	int deck_main_max = DECK_MAX_SIZE;
+	int deck_extra_max = EXTRA_MAX_SIZE;
+	int deck_side_max = SIDE_MAX_SIZE;
+	bool deck_limits_set = false;
+
+	void SetDeckLimits(int main_min, int main_max, int extra_max, int side_max);
+
 #ifndef YGOPRO_SERVER_MODE
 	static constexpr int MAX_YDK_SIZE = 0x10000;
 #endif
@@ -73,7 +82,7 @@ public:
 	bool LoadCurrentDeck(std::istringstream& deckStream, bool is_packlist = false);
 #endif //YGOPRO_SERVER_MODE
 
-	static uint32_t LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t sidec, bool is_packlist = false);
+	static uint32_t LoadDeck(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t sidec, bool is_packlist = false, int main_max = DECK_MAX_SIZE, int extra_max = EXTRA_MAX_SIZE, int side_max = SIDE_MAX_SIZE);
 	static uint32_t LoadDeckFromStream(Deck& deck, std::istringstream& deckStream, bool is_packlist = false);
 	static bool LoadSide(Deck& deck, uint32_t dbuf[], uint32_t mainc, uint32_t sidec);
 #ifndef YGOPRO_SERVER_MODE

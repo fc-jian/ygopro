@@ -356,7 +356,7 @@ void SingleDuel::PlayerReady(DuelPlayer* dp, bool is_ready) {
 		return;
 	if(is_ready) {
 		uint32_t deckerror = 0;
-		if(!host_info.no_check_deck) {
+		if(!host_info.no_check_deck || deckManager.deck_limits_set) {
 			if(deck_error[dp->type]) {
 				deckerror = (DECKERROR_UNKNOWNCARD << 28) | deck_error[dp->type];
 			} else {
@@ -425,7 +425,7 @@ void SingleDuel::UpdateDeck(DuelPlayer* dp, unsigned char* pdata, unsigned int l
 	uint32_t deckbuf[MAINC_MAX + SIDEC_MAX];
 	std::memcpy(deckbuf, pdata, (mainc + sidec) * sizeof(uint32_t));
 	if(duel_count == 0) {
-		deck_error[dp->type] = DeckManager::LoadDeck(pdeck[dp->type], deckbuf, mainc, sidec);
+		deck_error[dp->type] = DeckManager::LoadDeck(pdeck[dp->type], deckbuf, mainc, sidec, false, deckManager.deck_main_max, deckManager.deck_extra_max, deckManager.deck_side_max);
 #ifdef YGOPRO_SERVER_MODE
 		PlayerReady(dp, true);
 #endif

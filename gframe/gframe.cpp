@@ -13,7 +13,18 @@
 #endif
 #ifdef YGOPRO_SERVER_MODE
 #include "base64.h"
+#include "deck_manager.h"
 #endif
+
+static bool isNumericArg(const char* s) {
+	size_t len = strlen(s);
+	if(len == 0 || len > 4)
+		return false;
+	for(size_t i = 0; i < len; ++i)
+		if(!isdigit((unsigned char)s[i]))
+			return false;
+	return true;
+}
 
 #if defined(_WIN32) && (!defined(WDK_NTDDI_VERSION) || (WDK_NTDDI_VERSION < 0x0A000005)) // Redstone 4, Version 1803, Build 17134.
 #error "This program requires the Windows 10 SDK version 1803 or above to compile on Windows. Otherwise, non-ASCII characters will not be displayed or processed correctly."
@@ -115,7 +126,16 @@ int main(int argc, char* argv[]) {
 		ygo::game_info.draw_count = atoi(argv[10]);
 		ygo::game_info.time_limit = atoi(argv[11]);
 		ygo::replay_mode = atoi(argv[12]);
-		for (int i = 13; (i < argc && i < (13 + MAX_MATCH_COUNT)) ; ++i)
+		int seed_start = 13;
+		// Cube extension (srvpro cube rooms): spawn args 13..16 carry runtime deck size
+		// limits (main_min, main_max, extra_max, side_max) as short digit strings, pushing
+		// match seeds to 17+. Legacy spawns put base64 seeds at 13+; a base64 seed string is
+		// never all-digits, so the two layouts are unambiguously distinguishable.
+		if(argc >= 17 && isNumericArg(argv[13]) && isNumericArg(argv[14]) && isNumericArg(argv[15]) && isNumericArg(argv[16])) {
+			ygo::deckManager.SetDeckLimits(atoi(argv[13]), atoi(argv[14]), atoi(argv[15]), atoi(argv[16]));
+			seed_start = 17;
+		}
+		for (int i = seed_start; (i < argc && i < (seed_start + MAX_MATCH_COUNT)) ; ++i)
 		{
 			auto ok = Base64::Decode(
 				reinterpret_cast<const unsigned char*>(argv[i]),
