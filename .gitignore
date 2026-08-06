@@ -47,3 +47,13 @@
 /gframe/ygopro.aps
 /premake5
 /premake5.exe
+/premake/event/
+/premake/freetype/
+/premake/irrlicht/
+/premake/jpeg/
+/premake/lua/
+/premake/lzma/
+/premake/miniaudio/
+/premake/png/
+/premake/sqlite3/
+/premake/zlib/
