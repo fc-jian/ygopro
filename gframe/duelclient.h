@@ -25,6 +25,10 @@ private:
 
 public:
 	static unsigned char selftype;
+	// cube mode: set when the server pushed a STOC_CUBE_DECK; deck selection is locked
+	static bool is_cube_deck_locked;
+	// cube mode: deck snapshot taken at siding start, used to validate side swaps
+	static Deck cube_side_snapshot;
 	static bool StartClient(unsigned int ip, unsigned short port, bool create_game = true);
 	static void ConnectTimeout(EventSocket fd, short events, void* arg);
 	static void StopClient(unsigned reason = CLIENT_CLOSE_REASON_STOP);

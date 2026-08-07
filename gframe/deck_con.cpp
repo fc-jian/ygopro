@@ -697,11 +697,33 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					mainGame->env->addMessageBox(L"", dataManager.GetSysString(1410));
 					break;
 				}
+				if(DuelClient::is_cube_deck_locked) {
+					// cube mode: siding may only swap cards between main/extra and side,
+					// the union multiset must stay identical to the siding-start snapshot
+					std::vector<uint32_t> current_codes, snapshot_codes;
+					auto collect = [](const Deck& deck, std::vector<uint32_t>& out) {
+						for(const auto& card : deck.main) out.push_back(card->code);
+						for(const auto& card : deck.extra) out.push_back(card->code);
+						for(const auto& card : deck.side) out.push_back(card->code);
+					};
+					collect(deckManager.current_deck, current_codes);
+					collect(DuelClient::cube_side_snapshot, snapshot_codes);
+					std::sort(current_codes.begin(), current_codes.end());
+					std::sort(snapshot_codes.begin(), snapshot_codes.end());
+					if(current_codes != snapshot_codes) {
+						soundManager.PlaySoundEffect(SOUND_INFO);
+						mainGame->env->addMessageBox(L"", dataManager.GetSysString(1410));
+						break;
+					}
+				}
 				mainGame->ClearCardInfo();
 				DuelClient::SendUpdateDeck(deckManager.current_deck);
 				break;
 			}
 			case BUTTON_SIDE_RELOAD: {
+				// cube mode: the deck is locked to the server-pushed one, don't reload from disk
+				if(DuelClient::is_cube_deck_locked)
+					break;
 				load_current_deck(mainGame->cbCategorySelect, mainGame->cbDeckSelect);
 				break;
 			}

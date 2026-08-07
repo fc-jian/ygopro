@@ -64,6 +64,8 @@ namespace {
 bufferevent* DuelClient::client_bev = 0;
 unsigned char DuelClient::duel_client_write[SIZE_NETWORK_BUFFER]{};
 unsigned char DuelClient::selftype = 0;
+bool DuelClient::is_cube_deck_locked = false;
+Deck DuelClient::cube_side_snapshot;
 std::vector<HostPacket> DuelClient::hosts;
 
 int DuelClient::WriteBufferEvent(bufferevent* bufev, const void* data, size_t size) {
@@ -454,6 +456,9 @@ void DuelClient::HandleSTOCPacketLan(unsigned char* data, size_t len) {
 		mainGame->deckBuilder.pre_mainc = deckManager.current_deck.main.size();
 		mainGame->deckBuilder.pre_extrac = deckManager.current_deck.extra.size();
 		mainGame->deckBuilder.pre_sidec = deckManager.current_deck.side.size();
+		if(is_cube_deck_locked)
+			// cube mode: snapshot the deck at siding start for the union check on side ok
+			cube_side_snapshot = deckManager.current_deck;
 		mainGame->device->setEventReceiver(&mainGame->deckBuilder);
 		mainGame->gMutex.unlock();
 		break;
@@ -479,6 +484,54 @@ void DuelClient::HandleSTOCPacketLan(unsigned char* data, size_t len) {
 		extrac = BufferIO::Read<uint16_t>(pdata);
 		sidec = BufferIO::Read<uint16_t>(pdata);
 		mainGame->dField.Initial(1, deckc, extrac, sidec);
+		mainGame->gMutex.unlock();
+		break;
+	}
+	case STOC_CUBE_DECK: {
+		if (len < 1 + sizeof(uint32_t) * 2)
+			return;
+		uint32_t mainc = BufferIO::Read<uint32_t>(pdata);
+		uint32_t sidec = BufferIO::Read<uint32_t>(pdata);
+		if (mainc > MAINC_MAX || sidec > SIDEC_MAX)
+			return;
+		if (len < 1 + sizeof(uint32_t) * (2 + (size_t)mainc + sidec))
+			return;
+		std::vector<uint32_t> codes(mainc + sidec);
+		for (uint32_t i = 0; i < mainc + sidec; ++i)
+			codes[i] = BufferIO::Read<uint32_t>(pdata);
+		// mainc includes extra-deck cards; LoadDeck splits them out by card type.
+		// Sizes are decided by the server, so don't truncate at the local deck limits.
+		Deck cube_deck;
+		deckManager.LoadDeck(cube_deck, codes.data(), mainc, sidec, false, MAINC_MAX, MAINC_MAX, MAINC_MAX);
+		mainGame->gMutex.lock();
+		if(!DeckManager::SaveDeck(cube_deck, L"./deck/cube-current.ydk")) {
+			mainGame->env->addMessageBox(L"", L"[Cube] 比赛卡组保存失败（无法写入 ./deck/cube-current.ydk，请检查磁盘空间与目录权限），卡组未锁定。");
+		} else {
+			// cbDeckSelect only lists decks of the currently selected category, while
+			// cube-current.ydk is saved to the ./deck root; switch to the no-category
+			// entry first, otherwise a leftover custom-category selection would make
+			// the search below miss and lock onto the wrong deck.
+			mainGame->cbCategorySelect->setSelected(DECK_CATEGORY_NONE);
+			mainGame->RefreshDeck(mainGame->cbCategorySelect, mainGame->cbDeckSelect);
+			bool found = false;
+			for(size_t i = 0; i < mainGame->cbDeckSelect->getItemCount(); ++i) {
+				if(std::wstring(mainGame->cbDeckSelect->getItem(i)) == L"cube-current") {
+					mainGame->cbDeckSelect->setSelected(i);
+					found = true;
+					break;
+				}
+			}
+			if(!found) {
+				mainGame->env->addMessageBox(L"", L"[Cube] 卡组列表中找不到 cube-current（./deck/cube-current.ydk 已保存但未被列出），卡组未锁定。");
+			} else if(deckManager.LoadCurrentDeck(mainGame->cbCategorySelect->getSelected(), mainGame->cbCategorySelect->getText(), mainGame->cbDeckSelect->getText())) {
+				mainGame->cbCategorySelect->setEnabled(false);
+				mainGame->cbDeckSelect->setEnabled(false);
+				is_cube_deck_locked = true;
+				mainGame->AddChatMsg(L"比赛卡组已同步并锁定（cube-current）。", 8);
+			} else {
+				mainGame->env->addMessageBox(L"", L"[Cube] 比赛卡组加载失败（LoadCurrentDeck 解析 ./deck/cube-current.ydk 出错），卡组未锁定。");
+			}
+		}
 		mainGame->gMutex.unlock();
 		break;
 	}
@@ -548,6 +601,8 @@ void DuelClient::HandleSTOCPacketLan(unsigned char* data, size_t len) {
 			mainGame->deckBuilder.filterList = &deckManager._lfList[0];
 		mainGame->stHostPrepOB->setText(L"");
 		mainGame->SetStaticText(mainGame->stHostPrepRule, 180, mainGame->guiFont, str.c_str());
+		// a new room is not cube-locked by default; STOC_CUBE_DECK (arriving later) locks it again
+		is_cube_deck_locked = false;
 		mainGame->RefreshCategoryDeck(mainGame->cbCategorySelect, mainGame->cbDeckSelect);
 		mainGame->cbCategorySelect->setEnabled(true);
 		mainGame->cbDeckSelect->setEnabled(true);
