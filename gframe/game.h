@@ -70,7 +70,7 @@ struct Config {
 	wchar_t lastport[10]{};
 	wchar_t nickname[20]{ L"Player" };
 	wchar_t gamename[20]{ L"Game" };
-	wchar_t roompass[20]{};
+	wchar_t roompass[256]{};
 	//path
 	wchar_t lastcategory[256]{};
 	wchar_t lastdeck[256]{};

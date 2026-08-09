@@ -43,6 +43,38 @@ namespace {
 	bool is_refreshing{};
 	int match_kill{};
 	std::set<std::pair<unsigned int, unsigned short>> remotes{};
+
+	bool EncodeJoinPass(const wchar_t* input, std::vector<uint16_t>& output) {
+		output.clear();
+		for (const wchar_t* p = input; p && *p; ++p) {
+			const uint32_t cp = static_cast<uint32_t>(*p);
+			if (sizeof(wchar_t) == 2) {
+				if (BufferIO::IsHighSurrogate(cp)) {
+					const uint32_t low = static_cast<uint32_t>(p[1]);
+					if (!BufferIO::IsLowSurrogate(low))
+						return false;
+					output.push_back(static_cast<uint16_t>(cp));
+					output.push_back(static_cast<uint16_t>(low));
+					++p;
+				} else if (BufferIO::IsLowSurrogate(cp))
+					return false;
+				else
+					output.push_back(static_cast<uint16_t>(cp));
+			} else {
+				if (cp <= 0xffff && !BufferIO::IsHighSurrogate(cp) && !BufferIO::IsLowSurrogate(cp))
+					output.push_back(static_cast<uint16_t>(cp));
+				else if (cp >= 0x10000 && cp <= 0x10ffff) {
+					const uint32_t v = cp - 0x10000;
+					output.push_back(static_cast<uint16_t>(0xd800 + (v >> 10)));
+					output.push_back(static_cast<uint16_t>(0xdc00 + (v & 0x3ff)));
+				} else
+					return false;
+			}
+			if (output.size() > 255)
+				return false;
+		}
+		return true;
+	}
 	event* resp_event{};
 	const std::set<int> select_effectyn_id{ 95, 96, 97, 218, 219, 220 };
 
@@ -194,12 +226,34 @@ void DuelClient::ClientEvent(bufferevent* bev, short events, void* ctx) {
 			}
 			SendPacketToServer(CTOS_CREATE_GAME, cscg);
 		} else {
-			CTOS_JoinGame csjg;
-			csjg.version = PRO_VERSION;
-			csjg.gameid = 0;
-			BufferIO::CopyCharArray(mainGame->ebJoinPass->getText(), csjg.pass);
-			SendPacketToServer(CTOS_JOIN_GAME, csjg);
-		}
+				CTOS_JoinGame csjg{};
+				csjg.version = PRO_VERSION;
+				csjg.gameid = 0;
+				std::vector<uint16_t> pass;
+				if (!EncodeJoinPass(mainGame->ebJoinPass->getText(), pass)) {
+					mainGame->gMutex.lock();
+					mainGame->env->addMessageBox(L"", L"[Cube] 房间密码最多 255 个 UTF-16 字符，且必须是有效 Unicode。未发送已截断的密码。");
+					mainGame->gMutex.unlock();
+					if (client_base)
+						event_base_loopbreak(client_base);
+					return;
+				}
+				if (pass.size() < sizeof(csjg.pass) / sizeof(csjg.pass[0])) {
+					for (size_t i = 0; i < pass.size(); ++i)
+						csjg.pass[i] = pass[i];
+					SendPacketToServer(CTOS_JOIN_GAME, csjg);
+				} else {
+					std::vector<unsigned char> payload;
+					payload.reserve(8 + (pass.size() + 1) * sizeof(uint16_t));
+					BufferIO::VectorWrite<uint16_t>(payload, PRO_VERSION);
+					BufferIO::VectorWrite<uint16_t>(payload, 0); // protocol alignment padding
+					BufferIO::VectorWrite<uint32_t>(payload, 0); // gameid
+					for (const auto unit : pass)
+						BufferIO::VectorWrite<uint16_t>(payload, unit);
+					BufferIO::VectorWrite<uint16_t>(payload, 0);
+					SendBufferToServer(CTOS_JOIN_GAME, payload.data(), payload.size());
+				}
+			}
 		bufferevent_enable(bev, EV_READ);
 		connect_state |= CONNECT_STATE_CONNECTED;
 	} else if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
@@ -499,37 +553,66 @@ void DuelClient::HandleSTOCPacketLan(unsigned char* data, size_t len) {
 		std::vector<uint32_t> codes(mainc + sidec);
 		for (uint32_t i = 0; i < mainc + sidec; ++i)
 			codes[i] = BufferIO::Read<uint32_t>(pdata);
+		// The filename trailer is optional so servers and clients can be upgraded in
+		// either order. Accept ASCII filesystem-safe basenames only; malformed or
+		// legacy payloads retain the old cube-current fallback without path traversal.
+		std::wstring cube_deck_name = L"cube-current";
+		const size_t deck_body_len = sizeof(uint32_t) * (2 + (size_t)mainc + sidec);
+		if(len >= 1 + deck_body_len + sizeof(uint16_t)) {
+			const uint16_t name_len = BufferIO::Read<uint16_t>(pdata);
+			if(name_len > 0 && name_len <= 220 && len >= 1 + deck_body_len + sizeof(uint16_t) + name_len) {
+				bool safe = true;
+				std::wstring parsed;
+				parsed.reserve(name_len);
+				for(uint16_t i = 0; i < name_len; ++i) {
+					const unsigned char ch = pdata[i];
+					if(!((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.')) {
+						safe = false;
+						break;
+					}
+					parsed.push_back(static_cast<wchar_t>(ch));
+				}
+				if(safe && parsed.rfind(L"cube-deck-", 0) == 0)
+					cube_deck_name = std::move(parsed);
+			}
+		}
 		// mainc includes extra-deck cards; LoadDeck splits them out by card type.
 		// Sizes are decided by the server, so don't truncate at the local deck limits.
 		Deck cube_deck;
 		deckManager.LoadDeck(cube_deck, codes.data(), mainc, sidec, false, MAINC_MAX, MAINC_MAX, MAINC_MAX);
 		mainGame->gMutex.lock();
-		if(!DeckManager::SaveDeck(cube_deck, L"./deck/cube-current.ydk")) {
-			mainGame->env->addMessageBox(L"", L"[Cube] 比赛卡组保存失败（无法写入 ./deck/cube-current.ydk，请检查磁盘空间与目录权限），卡组未锁定。");
+		wchar_t cube_deck_path[512];
+		myswprintf(cube_deck_path, L"./deck/%ls.ydk", cube_deck_name.c_str());
+		if(!DeckManager::SaveDeck(cube_deck, cube_deck_path)) {
+			std::wstring message = L"[Cube] 比赛卡组保存失败（无法写入 " + std::wstring(cube_deck_path) + L"，请检查磁盘空间与目录权限），卡组未锁定。";
+			mainGame->env->addMessageBox(L"", message.c_str());
 		} else {
 			// cbDeckSelect only lists decks of the currently selected category, while
-			// cube-current.ydk is saved to the ./deck root; switch to the no-category
+			// The synchronized deck is saved to the ./deck root; switch to the no-category
 			// entry first, otherwise a leftover custom-category selection would make
 			// the search below miss and lock onto the wrong deck.
 			mainGame->cbCategorySelect->setSelected(DECK_CATEGORY_NONE);
 			mainGame->RefreshDeck(mainGame->cbCategorySelect, mainGame->cbDeckSelect);
 			bool found = false;
 			for(size_t i = 0; i < mainGame->cbDeckSelect->getItemCount(); ++i) {
-				if(std::wstring(mainGame->cbDeckSelect->getItem(i)) == L"cube-current") {
+				if(std::wstring(mainGame->cbDeckSelect->getItem(i)) == cube_deck_name) {
 					mainGame->cbDeckSelect->setSelected(i);
 					found = true;
 					break;
 				}
 			}
 			if(!found) {
-				mainGame->env->addMessageBox(L"", L"[Cube] 卡组列表中找不到 cube-current（./deck/cube-current.ydk 已保存但未被列出），卡组未锁定。");
+				std::wstring message = L"[Cube] 卡组列表中找不到 " + cube_deck_name + L"（文件已保存但未被列出），卡组未锁定。";
+				mainGame->env->addMessageBox(L"", message.c_str());
 			} else if(deckManager.LoadCurrentDeck(mainGame->cbCategorySelect->getSelected(), mainGame->cbCategorySelect->getText(), mainGame->cbDeckSelect->getText())) {
 				mainGame->cbCategorySelect->setEnabled(false);
 				mainGame->cbDeckSelect->setEnabled(false);
 				is_cube_deck_locked = true;
-				mainGame->AddChatMsg(L"比赛卡组已同步并锁定（cube-current）。", 8);
+				std::wstring message = L"比赛卡组已同步并锁定（" + cube_deck_name + L"）。";
+				mainGame->AddChatMsg(message.c_str(), 8);
 			} else {
-				mainGame->env->addMessageBox(L"", L"[Cube] 比赛卡组加载失败（LoadCurrentDeck 解析 ./deck/cube-current.ydk 出错），卡组未锁定。");
+				std::wstring message = L"[Cube] 比赛卡组加载失败（LoadCurrentDeck 解析 " + std::wstring(cube_deck_path) + L" 出错），卡组未锁定。";
+				mainGame->env->addMessageBox(L"", message.c_str());
 			}
 		}
 		mainGame->gMutex.unlock();
