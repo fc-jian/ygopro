@@ -25,7 +25,7 @@ project "lzma"
     includedirs {
         "src/common",
         "src/liblzma/api",
-        "src/liblzma/common", 
+        "src/liblzma/common",
         "src/liblzma/check",
         "src/liblzma/lzma",
         "src/liblzma/lz",

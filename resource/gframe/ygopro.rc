@@ -16,8 +16,8 @@ VALUE "InternalName", "YGOPro Server Mode"
 VALUE "LegalCopyright", "Copyright (C) 2025 Fluorohydride"
 VALUE "OriginalFilename", "YGOPro.exe"
 VALUE "ProductName", "YGOPro Server Mode"
-VALUE "FileVersion", "1.036.2"
-VALUE "ProductVersion", "1.036.2"
+VALUE "FileVersion", "1.036.2-cube"
+VALUE "ProductVersion", "1.036.2-cube"
 END
 END
 BLOCK "VarFileInfo"

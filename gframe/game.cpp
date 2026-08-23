@@ -16,12 +16,12 @@ namespace irr {
 }
 #endif
 #else
+#include "CGUITTFont.h"
 #include "file_system.h"
 #include "image_manager.h"
 #include "data_manager.h"
 #include "deck_manager.h"
 #include "sound_manager.h"
-#include "replay.h"
 #include "materials.h"
 #include "duelclient.h"
 #include "netserver.h"
@@ -254,7 +254,7 @@ bool Game::Initialize() {
 	lpcFont = irr::gui::CGUITTFont::createTTFont(env, gameConf.numfont, 48);
 	guiFont = irr::gui::CGUITTFont::createTTFont(env, gameConf.textfont, gameConf.textfontsize);
 	smgr = device->getSceneManager();
-	device->setWindowCaption(L"YGOPro");
+	device->setWindowCaption(L"YGOPro cube");
 	device->setResizable(true);
 	if(gameConf.window_maximized)
 		device->maximizeWindow();
@@ -268,7 +268,8 @@ bool Game::Initialize() {
 	SetWindowsIcon();
 	//main menu
 	wchar_t strbuf[256];
-	myswprintf(strbuf, L"YGOPro Version:%X.0%X.%X", (PRO_VERSION & 0xf000U) >> 12, (PRO_VERSION & 0x0ff0U) >> 4, PRO_VERSION & 0x000fU);
+	myswprintf(strbuf, L"YGOPro Version:%X.0%X.%X%ls", (PRO_VERSION & 0xf000U) >> 12,
+		(PRO_VERSION & 0x0ff0U) >> 4, PRO_VERSION & 0x000fU, PRODUCT_VERSION_SUFFIX);
 	wMainMenu = env->addWindow(irr::core::rect<irr::s32>(370, 200, 650, 415), false, strbuf);
 	wMainMenu->getCloseButton()->setVisible(false);
 	btnLanMode = env->addButton(irr::core::rect<irr::s32>(10, 30, 270, 60), wMainMenu, BUTTON_LAN_MODE, dataManager.GetSysString(1200));
@@ -1228,6 +1229,14 @@ void Game::BuildProjectionMatrix(irr::core::matrix4& mProjection, irr::f32 left,
 	mProjection[10] = zfar / (zfar - znear);
 	mProjection[11] = 1.0f;
 	mProjection[14] = znear * zfar / (znear - zfar);
+}
+void Game::FixFontGlitch() {
+	textFont->setTransparency(true);
+	guiFont->setTransparency(true);
+}
+// Wrapper for source files which don't include CGUITTFont.
+irr::core::dimension2d<irr::u32> Game::GetGUIFontDimension(const wchar_t* text) const {
+	return guiFont->getDimension(text);
 }
 void Game::InitStaticText(irr::gui::IGUIStaticText* pControl, irr::u32 cWidth, irr::u32 cHeight, irr::gui::CGUITTFont* font, const wchar_t* text) {
 	std::wstring format_text;

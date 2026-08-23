@@ -14,17 +14,8 @@
 #ifdef YGOPRO_SERVER_MODE
 #include "base64.h"
 #include "deck_manager.h"
+#include "server_args.h"
 #endif
-
-static bool isNumericArg(const char* s) {
-	size_t len = strlen(s);
-	if(len == 0 || len > 4)
-		return false;
-	for(size_t i = 0; i < len; ++i)
-		if(!isdigit((unsigned char)s[i]))
-			return false;
-	return true;
-}
 
 #if defined(_WIN32) && (!defined(WDK_NTDDI_VERSION) || (WDK_NTDDI_VERSION < 0x0A000005)) // Redstone 4, Version 1803, Build 17134.
 #error "This program requires the Windows 10 SDK version 1803 or above to compile on Windows. Otherwise, non-ASCII characters will not be displayed or processed correctly."
@@ -40,20 +31,17 @@ void ClickButton(irr::gui::IGUIElement* btn) {
 }
 #endif //YGOPRO_SERVER_MODE
 
-int main(int argc, char* argv[]) {
-#if defined(_WIN32)
-	std::setlocale(LC_CTYPE, ".UTF-8");
-#elif defined(__APPLE__)
-	std::setlocale(LC_CTYPE, "UTF-8");
+#ifdef YGOPRO_SERVER_MODE
+static int servermain(int argc, const char* const argv[]) {
 #else
-	std::setlocale(LC_CTYPE, "");
+static int mymain(int wargc, const wchar_t* const wargv[]) {
 #endif
 #ifndef YGOPRO_SERVER_MODE
 #ifdef __APPLE__
 	ygo::Game::FixMacOSBundleWorkingDirectory();
 #endif //__APPLE__
 #ifdef _WIN32
-	if (argc == 2 && (ygo::IsExtension(argv[1], ".ydk") || ygo::IsExtension(argv[1], ".yrp"))) { // open file from explorer
+	if (wargc == 2 && (ygo::IsExtension(wargv[1], L".ydk") || ygo::IsExtension(wargv[1], L".yrp"))) { // open file from explorer
 		wchar_t exepath[MAX_PATH];
 		GetModuleFileNameW(nullptr, exepath, MAX_PATH);
 		wchar_t* p = std::wcsrchr(exepath, L'\\');
@@ -126,37 +114,45 @@ int main(int argc, char* argv[]) {
 		ygo::game_info.draw_count = atoi(argv[10]);
 		ygo::game_info.time_limit = atoi(argv[11]);
 		ygo::replay_mode = atoi(argv[12]);
-		int seed_start = 13;
-		// Cube extension (srvpro cube rooms): spawn args 13..16 carry runtime deck size
-		// limits (main_min, main_max, extra_max, side_max) as short digit strings, pushing
-		// match seeds to 17+. Legacy spawns put base64 seeds at 13+; a base64 seed string is
-		// never all-digits, so the two layouts are unambiguously distinguishable.
-		if(argc >= 17 && isNumericArg(argv[13]) && isNumericArg(argv[14]) && isNumericArg(argv[15]) && isNumericArg(argv[16])) {
-			ygo::deckManager.SetDeckLimits(atoi(argv[13]), atoi(argv[14]), atoi(argv[15]), atoi(argv[16]));
-			seed_start = 17;
+		ygo::ServerExtensionArgs extension_args;
+		std::string extension_error;
+		if(!ygo::ParseServerExtensionArgs(argc, argv, ygo::MAINC_MAX, extension_args, extension_error)) {
+			std::fprintf(stderr, "Bad Cube extension params: %s\n", extension_error.c_str());
+			return 1;
 		}
-		for (int i = seed_start; (i < argc && i < (seed_start + MAX_MATCH_COUNT)) ; ++i)
-		{
+		if(extension_args.has_deck_limits) {
+			ygo::deckManager.SetDeckLimits(extension_args.deck_limits[0], extension_args.deck_limits[1],
+				extension_args.deck_limits[2], extension_args.deck_limits[3]);
+		}
+		const int seed_start = extension_args.seed_start;
+		for(int i = seed_start; i < argc && i < seed_start + MAX_MATCH_COUNT; ++i) {
+			const int seed_index = i - seed_start;
+			const size_t input_length = strlen(argv[i]);
+			if(input_length == 0 || input_length % 4 != 0
+				|| Base64::DecodedLength(reinterpret_cast<const unsigned char*>(argv[i]), input_length) != SEED_COUNT * sizeof(uint32_t)) {
+				std::fprintf(stderr, "Invalid seed length at index %d\n", seed_index);
+				continue;
+			}
 			auto ok = Base64::Decode(
 				reinterpret_cast<const unsigned char*>(argv[i]),
-				strlen(argv[i]),
-				reinterpret_cast<unsigned char*>(ygo::pre_seed[i - 13]),
+				input_length,
+				reinterpret_cast<unsigned char*>(ygo::pre_seed[seed_index]),
 				SEED_COUNT * sizeof(uint32_t)
 			);
 			if(ok) {
 				// check if it isn't all zero
 				bool all_zero = true;
 				for (int j = 0; j < SEED_COUNT; ++j) {
-					if (ygo::pre_seed[i - 13][j] != 0) {
+					if (ygo::pre_seed[seed_index][j] != 0) {
 						all_zero = false;
 						break;
 					}
 				}
 				if (!all_zero)
-					ygo::pre_seed_specified[i - 13] = 1;
+					ygo::pre_seed_specified[seed_index] = 1;
+			} else {
+				std::fprintf(stderr, "Failed to decode seed %d\n", seed_index);
 			}
-			else
-				std::fprintf(stderr, "Failed to decode seed %d: %s\n", i - 13, argv[i]);
 		}
 	}
 	ygo::mainGame = &_game;
@@ -166,19 +162,6 @@ int main(int argc, char* argv[]) {
 	ygo::mainGame = &_game;
 	if(!ygo::mainGame->Initialize())
 		return EXIT_FAILURE;
-
-#ifdef _WIN32
-	int wargc = 0;
-	std::unique_ptr<wchar_t*[], void(*)(wchar_t**)> wargv(CommandLineToArgvW(GetCommandLineW(), &wargc), [](wchar_t** wargv) {
-		LocalFree(wargv);
-	});
-#else
-	int wargc = argc;
-	auto wargv = std::make_unique<wchar_t[][256]>(wargc);
-	for(int i = 0; i < argc; ++i) {
-		BufferIO::DecodeUTF8(argv[i], wargv[i]);
-	}
-#endif //_WIN32
 
 	bool keep_on_return = false;
 	bool deckCategorySpecified = false;
@@ -310,3 +293,53 @@ int main(int argc, char* argv[]) {
 #endif //YGOPRO_SERVER_MODE
 	return EXIT_SUCCESS;
 }
+
+#ifdef _WIN32
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+	std::setlocale(LC_CTYPE, ".UTF-8");
+	int wargc = 0;
+	std::unique_ptr<wchar_t*[], void(*)(wchar_t**)> wargv(CommandLineToArgvW(GetCommandLineW(), &wargc), [](wchar_t** wargv) {
+		LocalFree(wargv);
+	});
+	if(!wargv)
+		return EXIT_FAILURE;
+#ifdef YGOPRO_SERVER_MODE
+	std::vector<std::string> utf8_arguments;
+	utf8_arguments.reserve(wargc);
+	for(int i = 0; i < wargc; ++i)
+		utf8_arguments.emplace_back(BufferIO::EncodeUTF8String(wargv[i]));
+	std::vector<const char*> argv;
+	argv.reserve(wargc);
+	for(const auto& argument : utf8_arguments)
+		argv.emplace_back(argument.c_str());
+	return servermain(wargc, argv.data());
+#else
+	return mymain(wargc, wargv.get());
+#endif
+}
+
+#else
+
+int main(int argc, char* argv[]) {
+#ifdef __APPLE__
+	std::setlocale(LC_CTYPE, "UTF-8");
+#else
+	std::setlocale(LC_CTYPE, "");
+#endif
+#ifdef YGOPRO_SERVER_MODE
+	return servermain(argc, argv);
+#else
+	std::vector<std::wstring> wide_arguments;
+	wide_arguments.reserve(argc);
+	for(int i = 0; i < argc; ++i)
+		wide_arguments.emplace_back(BufferIO::DecodeUTF8String(argv[i]));
+	std::vector<const wchar_t*> wargv;
+	wargv.reserve(argc);
+	for(const auto& argument : wide_arguments)
+		wargv.emplace_back(argument.c_str());
+	return mymain(argc, wargv.data());
+#endif
+}
+
+#endif //_WIN32

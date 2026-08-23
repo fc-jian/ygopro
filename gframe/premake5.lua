@@ -1,11 +1,16 @@
 if SERVER_MODE then
 project "ygopro"
-    kind "ConsoleApp"
+    filter "system:windows"
+        kind "WindowedApp"
+    filter "system:not windows"
+        kind "ConsoleApp"
+    filter {}
+
     cppdialect "C++14"
 
     defines { "YGOPRO_SERVER_MODE" }
 
-    files { "gframe.cpp", "config.h",
+    files { "gframe.cpp", "config.h", "server_args.h",
             "game.cpp", "game.h", "file_system.cpp", "file_system.h",
             "deck_manager.cpp", "deck_manager.h",
             "data_manager.cpp", "data_manager.h",
@@ -32,7 +37,7 @@ project "YGOPro"
         openmp "On"
     end
 
-    defines { "_IRR_STATIC_LIB_" }
+    dofile("../irrlicht/defines.lua")
     files { "*.cpp", "*.h" }
 end
 
@@ -87,13 +92,17 @@ if not SERVER_MODE then
 end
 
     filter "system:windows"
-        entrypoint "mainCRTStartup"
         files "ygopro.rc"
         if SERVER_PRO2_SUPPORT then
             targetname "AI.Server"
         end
         links { "ws2_32", "iphlpapi", "winmm" }
         defines { "NOMINMAX=1", "WIN32_LEAN_AND_MEAN" }
+        if USE_DXSDK then
+            defines { "IRR_COMPILE_WITH_DX9_DEV_PACK" }
+        else
+            defines { "NO_IRR_COMPILE_WITH_DIRECT3D_9_" }
+        end
 
     filter "not action:vs*"
         cppdialect "C++14"
