@@ -21,6 +21,21 @@ namespace{
 #endif
 	event* broadcast_ev{};
 	event* duel_etimer{};
+#ifdef YGOPRO_SERVER_MODE
+	event* shutdown_timer{};
+	unsigned shutdown_ticks{};
+	void DrainBeforeShutdown(EventSocket, short, void*) {
+		bool pending = false;
+		for(const auto& user : users)
+			pending = pending || evbuffer_get_length(bufferevent_get_output(user.first)) != 0;
+		// Allow queued writes and the proxy's final-frame handlers to run. A slow
+		// peer cannot retain the host indefinitely: shutdown is bounded at 1s.
+		if((++shutdown_ticks >= 5 && !pending) || shutdown_ticks >= 100) {
+			event_del(shutdown_timer);
+			event_base_loopexit(NetServer::net_evbase, nullptr);
+		}
+	}
+#endif
 	evconnlistener* listener{};
 	DuelMode* duel_mode{};
 	bool broadcast_enabled{};
@@ -153,8 +168,15 @@ void NetServer::StopServer() {
 	if(duel_mode)
 		duel_mode->EndDuel();
 #ifdef YGOPRO_SERVER_MODE // For solving the problem of connection lost after duel. See https://github.com/Fluorohydride/ygopro/issues/2067 for details.
-	timeval etv = { 0, 1 };
-	event_base_loopexit(net_evbase, &etv);
+	if(!shutdown_timer) {
+		shutdown_ticks = 0;
+		shutdown_timer = event_new(net_evbase, -1, EV_PERSIST, DrainBeforeShutdown, nullptr);
+		timeval interval = { 0, 10000 };
+		if(!shutdown_timer || event_add(shutdown_timer, &interval) != 0) {
+			timeval fallback = { 0, 100000 };
+			event_base_loopexit(net_evbase, &fallback);
+		}
+	}
 #else
 	event_base_loopexit(net_evbase, 0);
 #endif
@@ -279,6 +301,10 @@ void NetServer::ServerThread() {
 	if(duel_etimer)
 		event_free(duel_etimer);
 	duel_etimer = nullptr;
+#ifdef YGOPRO_SERVER_MODE
+	if(shutdown_timer) event_free(shutdown_timer);
+	shutdown_timer = nullptr;
+#endif
 	if(duel_mode)
 		delete duel_mode;
 	duel_mode = nullptr;
