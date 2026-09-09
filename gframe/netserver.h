@@ -22,6 +22,7 @@ public:
 #ifdef YGOPRO_SERVER_MODE
 	static event_base* net_evbase;
 	static void InitDuel();
+	static bool web_action_time;
 	static bool IsCanIncreaseTime(unsigned short gameMsg, const void* pdata, unsigned int len);
 	static void StopServer();
 	static void StopListen();

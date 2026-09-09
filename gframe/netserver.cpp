@@ -67,6 +67,7 @@ void NetServer::InitDuel()
 	}
 }
 
+bool NetServer::web_action_time = false;
 bool NetServer::IsCanIncreaseTime(unsigned short gameMsg, const void* pdata, unsigned int len) {
 	if(gameMsg == MSG_RETRY || gameMsg == MSG_SELECT_UNSELECT_CARD)
 		return false;

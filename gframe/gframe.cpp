@@ -125,6 +125,10 @@ static int mymain(int wargc, const wchar_t* const wargv[]) {
 			ygo::deckManager.SetDeckLimits(extension_args.deck_limits[0], extension_args.deck_limits[1],
 				extension_args.deck_limits[2], extension_args.deck_limits[3]);
 		}
+		if(argc > extension_args.seed_start && std::strcmp(argv[argc - 1], "--web-action-time") == 0) {
+			ygo::NetServer::web_action_time = true;
+			--argc;
+		}
 		const int seed_start = extension_args.seed_start;
 		for(int i = seed_start; i < argc && i < seed_start + MAX_MATCH_COUNT; ++i) {
 			const int seed_index = i - seed_start;

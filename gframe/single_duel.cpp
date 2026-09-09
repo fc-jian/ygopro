@@ -1816,14 +1816,31 @@ void SingleDuel::GetResponse(DuelPlayer* dp, unsigned char* pdata, unsigned int 
 		else time_limit[dp->type] = 0;
 		time_elapsed = 0;
 #ifdef YGOPRO_SERVER_MODE
-		if(time_backed[dp->type] > 0 && time_limit[dp->type] < host_info.time_limit && NetServer::IsCanIncreaseTime(last_game_msg, pdata, len)) {
+		if(!NetServer::web_action_time && time_backed[dp->type] > 0 && time_limit[dp->type] < host_info.time_limit && NetServer::IsCanIncreaseTime(last_game_msg, pdata, len)) {
 			++time_limit[dp->type];
 			++time_compensator[dp->type];
 			--time_backed[dp->type];
 		}
 #endif
 	}
+#ifdef YGOPRO_SERVER_MODE
+	const bool primary_action = last_game_msg == MSG_SELECT_IDLECMD || last_game_msg == MSG_SELECT_BATTLECMD
+		|| last_game_msg == MSG_SELECT_CHAIN;
+	const bool add_time = NetServer::web_action_time && host_info.time_limit && primary_action
+		&& NetServer::IsCanIncreaseTime(last_game_msg, pdata, len);
+	const auto response_player = dp->type;
+#endif
 	Process();
+#ifdef YGOPRO_SERVER_MODE
+	if(add_time && pduel && last_game_msg != MSG_RETRY) {
+		time_limit[response_player] = static_cast<uint16_t>(std::min<unsigned int>(65535, time_limit[response_player] + 2));
+		STOC_TimeLimit clock{};
+		clock.player = last_response;
+		clock.left_time = time_limit[last_response];
+		NetServer::SendPacketToPlayer(players[0], STOC_TIME_LIMIT, clock);
+		NetServer::ReSendToPlayer(players[1]);
+	}
+#endif
 	last_replay_response_size = 0;
 }
 void SingleDuel::EndDuel() {
